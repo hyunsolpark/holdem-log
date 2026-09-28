@@ -1,9 +1,10 @@
 // 대회 추가·편집 (결과 입력 포함)
 import {
-  data, sessionById, ticketById, ticketsWonBy, activeVenues, addVenue, saveSession, actions,
+  data, sessionById, ticketById, ticketsWonBy, activeVenues, addVenue, saveSession, actions, venueById,
 } from '../store.js';
 import { openSheet, bindNumber, dialog, toast, icon, ICONS, autosize } from '../ui.js';
-import { esc, uuid, todayStr, isValidDateStr, won, num, KIND, SESSION_STATUS, dateLabel } from '../utils.js';
+import { esc, uuid, todayStr, isValidDateStr, won, gm, num, KIND, SESSION_STATUS, dateLabel } from '../utils.js';
+import { venueRate } from '../money.js';
 import { segmented } from './common.js';
 
 export function openSessionForm(id = null, { status: presetStatus, date: presetDate, focusResult = false, prefill = null } = {}) {
@@ -26,6 +27,7 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     entrants: orig?.entrants ?? null,
     prize: orig?.prize ?? null,
     memo: orig?.memo ?? '',
+    gm: orig ? !!orig.gm : !!venueById(base?.venueId ?? activeVenues()[0]?.id)?.gameMoney,
     won: orig ? ticketsWonBy(orig.id).map((t) => ({ id: t.id, name: t.name, faceValue: t.faceValue, expiresAt: t.expiresAt ?? '', status: t.status })) : [],
   };
   let statusTouched = !!orig || !!presetStatus;
@@ -37,6 +39,8 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     isDirty: () => snap() !== initial,
   });
 
+  const unitOf = () => venueById(f.venueId)?.gmUnit ?? '억';
+  const amt = (v) => (f.gm ? String(+v.toFixed(2)) : num(v));
   const availableTickets = () => data.tickets.filter((t) => t.status === 'held' || t.id === f.entryTicketId)
     .sort((a, b) => (a.expiresAt ?? '9') < (b.expiresAt ?? '9') ? -1 : 1);
 
@@ -91,18 +95,18 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
       <div class="field-label">종류</div>
       ${segmented('kind', Object.entries(KIND).map(([k, v]) => ({ value: k, label: v })), f.kind, { small: true })}
 
-      <div class="field-label">참가 방식</div>
+      ${f.gm ? `<p class="info-line gm-info">${icon(ICONS.cash)}<span><b>게임머니 대회</b> · 바이인과 상금을 ${esc(unitOf())} 단위로 입력하면 ${esc(venueById(f.venueId)?.name ?? '')} 잔고에 반영돼요. 딴 오프라인 티켓은 원화 액면가로 적어 주세요.</span></p>` : `<div class="field-label">참가 방식</div>
       ${segmented('entry', [{ value: 'cash', label: '현금' }, { value: 'ticket', label: `티켓 사용${tickets.length ? ` (${tickets.length})` : ''}` }], f.entryTicketId ? 'ticket' : (f._entry ?? 'cash'), { small: true })}
       ${(f.entryTicketId || f._entry === 'ticket') ? (tickets.length ? `
         <div class="ticket-pick">
           ${tickets.map((t) => `<button type="button" class="ticket-opt ${t.id === f.entryTicketId ? 'on' : ''}" data-tpick="${esc(t.id)}" aria-pressed="${t.id === f.entryTicketId}">
             ${icon(ICONS.ticket)}<span><b>${esc(t.name)}</b><small>${won(t.faceValue)}${t.expiresAt ? ` · ~${dateLabel(t.expiresAt, { short: true })}` : ''}</small></span></button>`).join('')}
-        </div>` : '<p class="muted small-line">보유 중인 티켓이 없어요. 새틀라이트 결과에서 티켓을 추가하거나 티켓 목록에서 직접 추가하세요.</p>') : ''}
+        </div>` : '<p class="muted small-line">보유 중인 티켓이 없어요. 새틀라이트 결과에서 티켓을 추가하거나 티켓 목록에서 직접 추가하세요.</p>') : ''}`}
 
       <div class="row-2">
         <div>
           <label class="field-label" for="s-buyin">바이인 <span class="req">필수</span></label>
-          <div class="unit-input"><input id="s-buyin" class="field" type="text" inputmode="numeric" data-decimals="0" value="${f.buyIn ? num(f.buyIn) : ''}" placeholder="0"><span>원</span></div>
+          <div class="unit-input"><input id="s-buyin" class="field" type="text" inputmode="${f.gm ? 'decimal' : 'numeric'}" data-decimals="${f.gm ? 2 : 0}" value="${f.buyIn ? amt(f.buyIn) : ''}" placeholder="0"><span>${f.gm ? esc(unitOf()) : '원'}</span></div>
         </div>
         <div>
           <label class="field-label" for="s-re">리엔트리</label>
@@ -119,8 +123,8 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
           <div><label class="field-label" for="s-entrants">참가자</label><div class="unit-input"><input id="s-entrants" class="field" type="text" inputmode="numeric" data-decimals="0" value="${f.entrants ?? ''}" placeholder="-"><span>명</span></div></div>
           <div class="span-1"></div>
         </div>
-        <label class="field-label" for="s-prize">상금 (현금)</label>
-        <div class="unit-input"><input id="s-prize" class="field" type="text" inputmode="numeric" data-decimals="0" value="${f.prize ? num(f.prize) : ''}" placeholder="0"><span>원</span></div>
+        <label class="field-label" for="s-prize">상금 ${f.gm ? '(게임머니)' : '(현금)'}</label>
+        <div class="unit-input"><input id="s-prize" class="field" type="text" inputmode="${f.gm ? 'decimal' : 'numeric'}" data-decimals="${f.gm ? 2 : 0}" value="${f.prize ? amt(f.prize) : ''}" placeholder="0"><span>${f.gm ? esc(unitOf()) : '원'}</span></div>
 
         <div class="field-label">획득 티켓 ${f.kind === 'satellite' ? '<span class="hint">새틀라이트에서 딴 티켓을 추가하세요</span>' : ''}</div>
         <div class="won-list">
@@ -151,6 +155,19 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
   function updatePreview() {
     read();
     const b = sheet.body;
+    if (f.gm) {
+      const u = unitOf();
+      const cost = (f.buyIn || 0) * (1 + (f.reentries || 0));
+      b.querySelector('.cost-line').textContent = cost ? `총 비용 ${gm(cost, u)}` : '';
+      const pv = b.querySelector('.result-preview');
+      if (pv) {
+        const tv = f.won.reduce((a, w) => a + (w.faceValue || 0), 0);
+        const net = (f.prize || 0) - cost;
+        const rate = venueRate(f.venueId);
+        pv.innerHTML = `<span>게임머니</span><b class="${net > 0 ? 'gain' : net < 0 ? 'loss' : ''}">${gm(net, u, { sign: true })}</b>${tv ? `<span>티켓</span><b class="gain">+${won(tv)}</b>` : ''}<span class="muted">${rate != null ? `원화 환산 손익 ${won(Math.round(net * rate + tv), { sign: true })} (평균 충전 단가 기준)` : '충전 기록이 없어 원화 환산은 아직 안 돼요'}</span>`;
+      }
+      return;
+    }
     const t = f.entryTicketId ? ticketById(f.entryTicketId) : null;
     const first = t ? t.faceValue : (f.buyIn || 0);
     const cost = first + (f.buyIn || 0) * (f.reentries || 0);
@@ -185,7 +202,17 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
       if (next !== f.status) { f.status = next; render(); }
     });
     b.querySelectorAll('[data-venue]').forEach((el) => el.addEventListener('click', () => {
+      read();
       f.venueId = el.dataset.venue;
+      const nextGm = !!venueById(f.venueId)?.gameMoney;
+      if (nextGm !== f.gm) {
+        f.gm = nextGm;
+        if (f.gm) { f.entryTicketId = null; f._entry = 'cash'; }
+        f.buyIn = null; f.prize = null; // 단위가 바뀌므로 금액은 다시 입력
+        render();
+        if (!orig) toast(f.gm ? '게임머니 대회로 바뀌었어요. 금액을 다시 입력해 주세요' : '원화 대회로 바뀌었어요. 금액을 다시 입력해 주세요');
+        return;
+      }
       b.querySelectorAll('[data-venue]').forEach((x) => { x.classList.toggle('on', x === el); x.setAttribute('aria-pressed', String(x === el)); });
     }));
     b.querySelector('#venue-add').addEventListener('click', async () => {
@@ -263,7 +290,7 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     const row = {
       id: orig?.id ?? uuid(),
       status: f.status, date: f.date, startTime: f.startTime || null, endTime: f.endTime || null,
-      venueId: f.venueId, name: f.name, kind: f.kind, buyIn: f.buyIn, entryTicketId: f.entryTicketId,
+      venueId: f.venueId, name: f.name, kind: f.kind, gm: f.gm, buyIn: f.buyIn, entryTicketId: f.gm ? null : f.entryTicketId,
       reentries: f.reentries || 0,
       place: f.status === 'done' ? f.place ?? null : orig?.place ?? null,
       entrants: f.status === 'done' ? f.entrants ?? null : orig?.entrants ?? null,

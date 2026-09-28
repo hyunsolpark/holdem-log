@@ -1,8 +1,9 @@
 // 대회 상세 (전체 화면 페이지)
-import { sessionById, ticketById, ticketsWonBy, handsOf, venueName, deleteSession, canDeleteSession, saveSession, actions } from '../store.js';
+import { sessionById, venueById, ticketById, ticketsWonBy, handsOf, venueName, deleteSession, canDeleteSession, saveSession, actions } from '../store.js';
 import { sessionMoney, plannedCost } from '../money.js';
 import { openSheet, dialog, confirmDialog, toast, icon, ICONS } from '../ui.js';
-import { esc, won, dateLabel, todayStr, plainPct } from '../utils.js';
+import { esc, won, gm, dateLabel, todayStr, plainPct } from '../utils.js';
+import { rateText } from './wallet.js';
 import { renderMarkdown } from '../markdown.js';
 import { kindBadge, statusBadge, profitHtml, handCard, ticketRow, dueBadge } from './common.js';
 import { openSessionForm } from './session-form.js';
@@ -33,6 +34,7 @@ export function openSessionDetail(id) {
     const won_ = ticketsWonBy(id);
     const hands = handsOf(id);
     const pending = s.status === 'planned' && s.date < todayStr();
+    const unit = venueById(s.venueId)?.gmUnit ?? '억';
     const y = sheet.body.scrollTop;
 
     sheet.body.innerHTML = `
@@ -48,12 +50,24 @@ export function openSessionDetail(id) {
           ${pending ? '<button type="button" class="btn ghost" data-act="skip">불참 처리</button>' : `<button type="button" class="btn ghost" data-act="cal">${icon(ICONS.cal)}캘린더에 추가</button>`}
         </div>
         <section class="card block money-card">
-          <div class="mrow"><span>참가 방식</span><b>${entryT ? `${icon(ICONS.ticket)}${esc(entryT.name)}` : '현금'}</b></div>
-          <div class="mrow"><span>바이인</span><b>${won(s.buyIn)}</b></div>
+          <div class="mrow"><span>참가 방식</span><b>${s.gm ? '게임머니' : entryT ? `${icon(ICONS.ticket)}${esc(entryT.name)}` : '현금'}</b></div>
+          <div class="mrow"><span>바이인</span><b>${s.gm ? gm(s.buyIn, unit) : won(s.buyIn)}</b></div>
           ${pc.ticket ? `<div class="mrow"><span>현금 지출</span><b>${won(0)}${s.reentries ? ` + 리엔트리` : ''}</b></div>` : ''}
         </section>` : ''}
 
-      ${s.status === 'done' ? `
+      ${s.status === 'done' && m.gm ? `
+        <section class="card block money-card">
+          <div class="mrow big"><span>게임머니 손익</span><b class="${m.gmProfit > 0 ? 'gain' : m.gmProfit < 0 ? 'loss' : ''}">${gm(m.gmProfit, unit, { sign: true })}</b></div>
+          <div class="mrow"><span>비용</span><b>${gm(m.gmCost, unit)}</b></div>
+          ${s.reentries ? `<div class="msub">바이인 ${gm(s.buyIn, unit)} × ${1 + s.reentries}회</div>` : ''}
+          <div class="mrow"><span>상금</span><b>${gm(m.gmPrize, unit)}</b></div>
+          <div class="mrow"><span>획득 티켓</span><b>${won(m.ticketValue)}${m.ticketsWon ? ` (${m.ticketsWon}장)` : ''}</b></div>
+          ${s.place ? `<div class="mrow"><span>순위</span><b>${s.place}위${s.entrants ? ` / ${s.entrants}명 (상위 ${plainPct(s.place / s.entrants)})` : ''}</b></div>` : ''}
+          <div class="mrow"><span>원화 환산 손익</span><b>${m.unconverted ? '<span class="muted">충전 기록 없음</span>' : profitHtml(Math.round(m.profit))}</b></div>
+          ${m.unconverted ? '' : `<div class="msub">${rateText(m.rate, unit)} (평균 충전 단가)</div>`}
+          <button type="button" class="link-btn" data-act="edit">${icon(ICONS.edit)}결과 수정</button>
+        </section>` : ''}
+      ${s.status === 'done' && !m.gm ? `
         <section class="card block money-card">
           <div class="mrow big"><span>손익</span><b>${profitHtml(m.profit)}</b></div>
           <div class="mrow"><span>비용</span><b>${won(m.cost)}</b></div>
@@ -63,8 +77,8 @@ export function openSessionDetail(id) {
           ${s.place ? `<div class="mrow"><span>순위</span><b>${s.place}위${s.entrants ? ` / ${s.entrants}명 (상위 ${plainPct(s.place / s.entrants)})` : ''}</b></div>` : ''}
           <div class="mrow"><span>ROI</span><b>${m.cost ? plainPct(m.profit / m.cost) : '-'}</b></div>
           <button type="button" class="link-btn" data-act="edit">${icon(ICONS.edit)}결과 수정</button>
-        </section>
-        ${won_.length ? `<h3 class="sec-title">획득 티켓</h3><div class="ticket-list card">${won_.map(ticketRow).join('')}</div>` : ''}` : ''}
+        </section>` : ''}
+      ${s.status === 'done' && won_.length ? `<h3 class="sec-title">획득 티켓</h3><div class="ticket-list card">${won_.map(ticketRow).join('')}</div>` : ''}
 
       ${s.status === 'skipped' ? '<p class="info-line">불참 처리된 대회예요. 손익·통계에 포함되지 않아요.</p>' : ''}
 

@@ -8,6 +8,8 @@ import { renderHands } from './views/hands.js';
 import { renderStats } from './views/stats.js';
 import { refreshSessionPages } from './views/session-detail.js';
 import { refreshTickets } from './views/sheets.js';
+import { refreshPlatformPages } from './views/wallet.js';
+import { refreshLedger, refreshSettings } from './views/settings.js';
 import { openSessionForm } from './views/session-form.js';
 import { openHandForm } from './views/hand-form.js';
 
@@ -40,6 +42,9 @@ actions.refresh = () => {
   renderTab();
   refreshSessionPages();
   refreshTickets();
+  refreshPlatformPages();
+  refreshLedger();
+  refreshSettings();
 };
 actions.switchTab = (tab) => { ui.tab = tab; renderTab({ scrollTop: true }); };
 

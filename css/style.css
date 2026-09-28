@@ -593,3 +593,23 @@ select.field { appearance: auto; }
   .br-item .v { font-size: 13px; }
   .pg-cell { min-height: 40px; font-size: 12px; }
 }
+
+/* ===== v1.1 게임머니 ===== */
+.gm-badge { background: rgba(237, 161, 0, 0.16); color: var(--weak); }
+.gm-info { display: flex; gap: 8px; align-items: flex-start; margin-top: 16px; }
+.gm-info .ic { flex: none; margin-top: 2px; }
+.small-info { font-size: 13px; margin: 0 0 12px; }
+.plat-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.plat-card { display: flex; flex-direction: column; align-items: flex-start; padding: 12px 14px; text-align: left; min-width: 0; }
+.plat-card:active { background: var(--select-wash); }
+.pl-name { font-size: 13px; color: var(--text-2); font-weight: 600; }
+.pl-bal { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.home-sec .block-head { margin-bottom: 0; }
+.home-sec .block-head .sec-title { margin: 0; }
+.lg-type.topup { color: var(--accent-text); }
+.lg-type.gmadjust { color: var(--muted); }
+tr[data-platform] { cursor: pointer; }
+.check-row { display: flex; align-items: center; gap: 10px; min-height: 48px; font-size: 15px; margin-top: 8px; }
+.check-row input { width: 20px; height: 20px; accent-color: var(--accent); }
+.check-row span { display: flex; flex-direction: column; }

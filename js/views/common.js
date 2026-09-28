@@ -1,7 +1,7 @@
 // 여러 화면이 함께 쓰는 조각
-import { venueName, ticketById } from '../store.js';
+import { venueName, venueById, ticketById } from '../store.js';
 import { sessionMoney, plannedCost } from '../money.js';
-import { esc, won, dateLabel, dueInfo, KIND, SESSION_STATUS, todayStr } from '../utils.js';
+import { esc, won, gm, dateLabel, dueInfo, KIND, SESSION_STATUS, todayStr } from '../utils.js';
 import { cardsHtml } from '../cards.js';
 import { icon, ICONS } from '../ui.js';
 
@@ -30,15 +30,19 @@ export function sessionCard(s) {
   const m = sessionMoney(s);
   const pc = plannedCost(s);
   const pending = s.status === 'planned' && s.date < todayStr();
+  const unit = venueById(s.venueId)?.gmUnit ?? '억';
   let result = '';
   if (s.status === 'done') {
     const parts = [];
     if (s.place) parts.push(`${s.place}위${s.entrants ? `/${s.entrants}` : ''}`);
-    if (m.prize) parts.push(`상금 ${won(m.prize)}`);
+    if (m.gm ? m.gmPrize : m.prize) parts.push(`상금 ${m.gm ? gm(m.gmPrize, unit) : won(m.prize)}`);
     if (m.ticketsWon) parts.push(`${icon(ICONS.ticket)}티켓 ${m.ticketsWon}장`);
-    result = `<span class="sc-result">${parts.join(' · ') || '입상 못 함'}</span><span class="sc-profit">${profitHtml(m.profit)}</span>`;
+    const profit = m.gm
+      ? `${m.gmProfit ? `<span class="${profitClass(m.gmProfit)}">${gm(m.gmProfit, unit, { sign: true })}</span>` : ''}${m.ticketValue ? `${m.gmProfit ? ' ' : ''}<span class="gain">+${won(m.ticketValue)}</span>` : ''}${!m.gmProfit && !m.ticketValue ? gm(0, unit) : ''}`
+      : profitHtml(m.profit);
+    result = `<span class="sc-result">${parts.join(' · ') || '입상 못 함'}</span><span class="sc-profit">${profit}</span>`;
   } else if (s.status === 'planned') {
-    result = `<span class="sc-result">${pc.ticket ? `${icon(ICONS.ticket)}티켓 참가` : `바이인 ${won(s.buyIn)}`}</span>
+    result = `<span class="sc-result">${pc.ticket ? `${icon(ICONS.ticket)}티켓 참가` : `바이인 ${s.gm ? gm(s.buyIn, unit) : won(s.buyIn)}`}</span>
       ${pending ? '<span class="pending-badge">결과 입력</span>' : dueBadge(s.date)}`;
   } else {
     result = '<span class="sc-result muted">불참</span>';
@@ -48,7 +52,7 @@ export function sessionCard(s) {
       <span class="sc-top">
         <span class="sc-date">${dateLabel(s.date, { short: true })}${s.startTime ? ` ${s.startTime}` : ''}</span>
         <span class="sc-venue">${esc(venueName(s.venueId))}</span>
-        ${kindBadge(s.kind)}
+        ${s.gm ? '<span class="badge gm-badge">게임머니</span>' : ''}${kindBadge(s.kind)}
       </span>
       <span class="sc-name">${esc(s.name)}</span>
       <span class="sc-bottom">${result}</span>

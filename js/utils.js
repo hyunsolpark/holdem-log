@@ -189,6 +189,15 @@ export function wonShort(n) {
 export const pct = (v, d = 1) => (v == null || !Number.isFinite(v) ? '-' : `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(d)}%`);
 export const plainPct = (v, d = 1) => (v == null || !Number.isFinite(v) ? '-' : `${(v * 100).toFixed(d)}%`);
 
+/** 게임머니: 5 → '5억', 1250.5 → '1,250.5억' */
+export function gm(n, unit = '억', { sign = false } = {}) {
+  if (n == null || Number.isNaN(n)) return '-';
+  const abs = Math.abs(round(n, 2));
+  const body = abs.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const s = n < 0 && abs !== 0 ? '−' : sign && abs !== 0 ? '+' : '';
+  return `${s}${body}${unit}`;
+}
+
 /* ---------- 라벨 ---------- */
 export const SESSION_STATUS = {
   planned: { label: '예정', cls: 'st-planned' },

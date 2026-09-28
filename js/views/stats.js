@@ -1,7 +1,7 @@
 // 통계 탭
 import { ui, data } from '../store.js';
 import { stats } from '../money.js';
-import { esc, won, plainPct, pct, dateLabel, KIND, TICKET_STATUS } from '../utils.js';
+import { esc, won, gm, plainPct, pct, dateLabel, KIND, TICKET_STATUS } from '../utils.js';
 import { segmented, profitHtml } from './common.js';
 import { lineChart } from '../charts.js';
 
@@ -43,6 +43,8 @@ export function renderStats(root) {
         ${T.best && T.best.profit > 0 ? `<button type="button" class="best-row" data-session="${esc(T.best.session.id)}"><span class="k">최고 성적</span><span>${esc(T.best.session.name)} · ${dateLabel(T.best.session.date, { short: true })}</span>${profitHtml(T.best.profit)}</button>` : ''}
       </section>
 
+      ${T.gmCount ? `<p class="info-line small-info">게임머니 대회 ${T.gmCount}건은 플랫폼별 평균 충전 단가로 원화 환산해서 합쳤어요.${T.unconverted ? ` 충전 기록이 없는 ${T.unconverted}건은 티켓 가치만 반영했어요.` : ''}</p>` : ''}
+
       <section class="card block">
         <h3 class="block-title">누적 손익</h3>
         <div id="chart" class="no-swipe"></div>
@@ -62,6 +64,18 @@ export function renderStats(root) {
           <p class="help">${!S.satellite.successRate ? '아직 티켓을 따지 못했어요.' : S.satellite.successRate >= 1 ? '참가할 때마다 티켓을 땄어요.' : `약 ${Math.round((1 / S.satellite.successRate) * 10) / 10}번 참가에 1번꼴로 티켓을 땄어요.`}</p>`
     : '<p class="muted empty-line">이 기간에 새틀라이트 기록이 없어요</p>'}
       </section>
+
+      ${S.platforms.length ? `
+      <section class="card block">
+        <h3 class="block-title">온라인 플랫폼 (전체 기간)</h3>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th></th><th>충전</th><th>딴 티켓</th><th>회수율</th><th>잔고</th></tr></thead>
+          <tbody>${S.platforms.map((b) => `<tr data-platform="${esc(b.venueId)}">
+            <td class="t-label">${esc(b.venue.name)}</td><td>${won(b.topupKrw)}</td><td>${won(b.ticketValue)}</td>
+            <td class="${b.recovery >= 1 ? 'gain' : ''}">${b.recovery != null ? plainPct(b.recovery, 0) : '-'}</td><td>${gm(b.balance, b.venue.gmUnit)}</td>
+          </tr>`).join('')}</tbody></table></div>
+        <p class="help">회수율 = 딴 티켓 액면가 ÷ 충전한 현금. 100%를 넘으면 충전한 돈보다 더 큰 가치의 티켓을 딴 거예요.</p>
+      </section>` : ''}
 
       <section class="card block">
         <h3 class="block-title">플랫폼·장소별</h3>
@@ -84,6 +98,7 @@ export function renderStats(root) {
   root.querySelectorAll('[data-period]').forEach((b) => b.addEventListener('click', () => { ui.statsPeriod = b.dataset.period; renderStats(root); }));
   root.querySelectorAll('[data-tview], [data-act="tickets"]').forEach((b) => b.addEventListener('click', async () => (await import('./sheets.js')).openTickets(b.dataset.tview || 'held')));
   root.querySelectorAll('[data-session]').forEach((b) => b.addEventListener('click', async () => (await import('./session-detail.js')).openSessionDetail(b.dataset.session)));
+  root.querySelectorAll('tr[data-platform]').forEach((r) => r.addEventListener('click', async () => (await import('./wallet.js')).openPlatform(r.dataset.platform)));
   const chart = root.querySelector('#chart');
   if (chart && S.series.length) {
     const readout = root.querySelector('.chart-readout');

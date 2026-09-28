@@ -23,9 +23,9 @@ export const ui = {
 export const actions = { refresh: () => {} };
 
 const DEFAULT_VENUES = [
-  { name: 'HPT', type: 'online' },
-  { name: '피망', type: 'online' },
-  { name: 'WPL', type: 'online' },
+  { name: 'HPT', type: 'online', gameMoney: true, gmUnit: '억' },
+  { name: '피망', type: 'online', gameMoney: true, gmUnit: '억' },
+  { name: 'WPL', type: 'online', gameMoney: true, gmUnit: '억' },
 ];
 
 export async function loadAll() {
@@ -33,11 +33,30 @@ export async function loadAll() {
     ['sessions', 'tickets', 'hands', 'venues', 'ledger', 'settings'].map(getAll),
   );
   Object.assign(data, { sessions, tickets, hands, ledger });
-  data.venues = venues.sort((a, b) => a.order - b.order);
+  data.venues = venues.sort((a, b) => a.order - b.order).map((v) => ({ gameMoney: false, gmUnit: '억', ...v }));
   data.settings = {
     startingBankroll: 0, bankrollStartDate: null, handTags: [...DEFAULT_HAND_TAGS],
     ...Object.fromEntries(settings.map((r) => [r.key, r.value])),
   };
+  await migrateGameMoney();
+}
+
+/**
+ * v1.1: 온라인 플랫폼 게임머니 도입.
+ * 기존 온라인 플랫폼 중 기록된 대회가 없는 곳만 게임머니로 전환한다
+ * (이미 원화로 기록한 대회가 있으면 설정에서 직접 바꾸도록 둔다).
+ */
+async function migrateGameMoney() {
+  if (!data.settings.initialized || data.settings.gmMigrated) return;
+  const rows = data.venues
+    .filter((v) => v.type === 'online' && !v.gameMoney && !data.sessions.some((s) => s.venueId === v.id))
+    .map((v) => ({ ...v, gameMoney: true, gmUnit: v.gmUnit || '억' }));
+  await write([
+    ...(rows.length ? [{ store: 'venues', put: rows }] : []),
+    { store: 'settings', put: { key: 'gmMigrated', value: true } },
+  ]);
+  rows.forEach((r) => replace(data.venues, r));
+  data.settings.gmMigrated = true;
 }
 
 /** 첫 실행: 기본 플랫폼 생성 */
@@ -46,10 +65,11 @@ export async function seedIfEmpty() {
   const venues = DEFAULT_VENUES.map((v, i) => ({ id: uuid(), ...v, order: i, deleted: false }));
   await write([
     { store: 'venues', put: venues },
-    { store: 'settings', put: [{ key: 'initialized', value: true }, { key: 'handTags', value: data.settings.handTags }] },
+    { store: 'settings', put: [{ key: 'initialized', value: true }, { key: 'gmMigrated', value: true }, { key: 'handTags', value: data.settings.handTags }] },
   ]);
   data.venues = venues;
   data.settings.initialized = true;
+  data.settings.gmMigrated = true;
   return true;
 }
 
@@ -249,8 +269,8 @@ export async function deleteLedger(id) {
 }
 
 /* ---------- 플랫폼·장소 ---------- */
-export async function addVenue(name, type) {
-  const v = { id: uuid(), name, type, order: data.venues.length ? Math.max(...data.venues.map((x) => x.order)) + 1 : 0, deleted: false };
+export async function addVenue(name, type, { gameMoney = false, gmUnit = '억' } = {}) {
+  const v = { id: uuid(), name, type, gameMoney, gmUnit, order: data.venues.length ? Math.max(...data.venues.map((x) => x.order)) + 1 : 0, deleted: false };
   await write([{ store: 'venues', put: v }]);
   data.venues.push(v);
   return v;

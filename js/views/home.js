@@ -1,7 +1,7 @@
 // 홈: 뱅크롤, 결과 입력 대기, 다가오는 일정, 만료 임박 티켓
 import { data, ui, actions } from '../store.js';
-import { bankroll, profitBetween } from '../money.js';
-import { won, todayStr, addDays, esc } from '../utils.js';
+import { bankroll, profitBetween, platformBalances } from '../money.js';
+import { won, gm, todayStr, addDays, esc, plainPct } from '../utils.js';
 import { icon, ICONS } from '../ui.js';
 import { sessionCard, ticketRow, profitHtml } from './common.js';
 
@@ -20,6 +20,7 @@ export function renderHome(root) {
   const limit = addDays(t, 30);
   const expiring = data.tickets.filter((x) => x.status === 'held' && x.expiresAt && x.expiresAt <= limit)
     .sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : 1));
+  const plats = platformBalances();
   const empty = !data.sessions.length && !data.tickets.length && !data.ledger.length && !data.settings.startingBankroll;
 
   root.innerHTML = `
@@ -40,6 +41,19 @@ export function renderHome(root) {
       </div>
       ${empty ? '<button type="button" class="link-btn" data-act="settings">시작 뱅크롤 설정하기 →</button>' : ''}
     </section>
+
+    ${plats.length ? `
+      <section class="home-sec">
+        <div class="block-head"><h2 class="sec-title">플랫폼 잔고 <span class="muted small">게임머니 · 뱅크롤 별도</span></h2><button type="button" class="link-btn" data-act="topup">${icon(ICONS.cash)}충전</button></div>
+        <div class="plat-list">
+          ${plats.map((b) => `
+            <button type="button" class="plat-card card" data-platform="${esc(b.venueId)}">
+              <span class="pl-name">${esc(b.venue.name)}</span>
+              <span class="pl-bal">${gm(b.balance, b.venue.gmUnit)}</span>
+              <span class="pl-sub">${b.balanceKrw != null ? `≈ ${won(Math.round(b.balanceKrw))}` : '충전 기록 없음'}${b.recovery != null ? ` · 회수 ${plainPct(b.recovery, 0)}` : ''}</span>
+            </button>`).join('')}
+        </div>
+      </section>` : ''}
 
     ${pending.length ? `
       <section class="home-sec">
@@ -65,6 +79,8 @@ export function renderHome(root) {
   on('settings', async () => (await import('./settings.js')).openSettings());
   on('ledger', async () => (await import('./settings.js')).openLedger());
   on('tickets', async () => (await import('./sheets.js')).openTickets('held'));
+  on('topup', async () => (await import('./wallet.js')).openTopup());
+  root.querySelectorAll('[data-platform]').forEach((b) => b.addEventListener('click', async () => (await import('./wallet.js')).openPlatform(b.dataset.platform)));
   on('all-planned', () => { ui.tab = 'sessions'; ui.sessionsView = 'planned'; actions.switchTab('sessions'); });
   root.querySelectorAll('[data-session]').forEach((b) => b.addEventListener('click', async () => {
     const s = data.sessions.find((x) => x.id === b.dataset.session);

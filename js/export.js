@@ -1,6 +1,6 @@
 // JSON 백업/검증, 대회 기록 CSV
 import { dumpAll } from './db.js';
-import { data, venueName, ticketById } from './store.js';
+import { data, venueName, venueById, ticketById } from './store.js';
 import { sessionMoney } from './money.js';
 import { stamp, isoLocal, isValidDateStr, download, SESSION_STATUS, KIND, TICKET_STATUS, DEFAULT_HAND_TAGS } from './utils.js';
 import { isCard } from './cards.js';
@@ -20,6 +20,7 @@ export async function exportJSON() {
 const isStr = (v) => typeof v === 'string';
 const has = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 const int0 = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : 0);
+const num0 = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
 const intOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.round(Number(v)));
 const timeOrNull = (v) => (isStr(v) && /^\d{2}:\d{2}$/.test(v) ? v : null);
 
@@ -36,14 +37,18 @@ export function parseBackup(text) {
 
   const venues = d.venues.map((v, i) => {
     if (!isStr(v?.id) || !isStr(v.name)) throw bad('플랫폼·장소', i);
-    return { id: v.id, name: v.name, type: v.type === 'offline' ? 'offline' : 'online', order: Number(v.order) || 0, deleted: !!v.deleted };
+    return {
+      id: v.id, name: v.name, type: v.type === 'offline' ? 'offline' : 'online', order: Number(v.order) || 0, deleted: !!v.deleted,
+      gameMoney: !!v.gameMoney, gmUnit: isStr(v.gmUnit) && v.gmUnit ? v.gmUnit.slice(0, 4) : '억',
+    };
   });
   const sessions = d.sessions.map((s, i) => {
     if (!isStr(s?.id) || !has(SESSION_STATUS, s.status) || !isValidDateStr(s.date) || !isStr(s.venueId) || !isStr(s.name) || !has(KIND, s.kind)) throw bad('대회', i);
     return {
       id: s.id, status: s.status, date: s.date, startTime: timeOrNull(s.startTime), endTime: timeOrNull(s.endTime),
-      venueId: s.venueId, name: s.name, kind: s.kind, buyIn: int0(s.buyIn), entryTicketId: isStr(s.entryTicketId) ? s.entryTicketId : null,
-      reentries: int0(s.reentries), place: intOrNull(s.place), entrants: intOrNull(s.entrants), prize: int0(s.prize),
+      venueId: s.venueId, name: s.name, kind: s.kind, gm: !!s.gm,
+      buyIn: s.gm ? num0(s.buyIn) : int0(s.buyIn), entryTicketId: isStr(s.entryTicketId) ? s.entryTicketId : null,
+      reentries: int0(s.reentries), place: intOrNull(s.place), entrants: intOrNull(s.entrants), prize: s.gm ? num0(s.prize) : int0(s.prize),
       memo: isStr(s.memo) ? s.memo : '', createdAt: Number(s.createdAt) || now, updatedAt: Number(s.updatedAt) || now,
     };
   });
@@ -69,8 +74,12 @@ export function parseBackup(text) {
     };
   });
   const ledger = d.ledger.map((e, i) => {
-    if (!isStr(e?.id) || !isValidDateStr(e.date) || !['deposit', 'withdraw'].includes(e.type) || !(Number(e.amount) > 0)) throw bad('입출금', i);
-    return { id: e.id, date: e.date, type: e.type, amount: Math.round(Number(e.amount)), memo: isStr(e.memo) ? e.memo : '', createdAt: Number(e.createdAt) || now };
+    if (!isStr(e?.id) || !isValidDateStr(e.date) || !['deposit', 'withdraw', 'topup', 'gmadjust'].includes(e.type)) throw bad('입출금', i);
+    const row = { id: e.id, date: e.date, type: e.type, amount: int0(e.amount), memo: isStr(e.memo) ? e.memo : '', createdAt: Number(e.createdAt) || now };
+    if (e.type === 'deposit' || e.type === 'withdraw') { if (!(row.amount > 0)) throw bad('입출금', i); return row; }
+    if (!isStr(e.venueId) || !Number.isFinite(Number(e.gm))) throw bad('충전 기록', i);
+    if (e.type === 'topup' && !(Number(e.gm) > 0 && row.amount > 0)) throw bad('충전 기록', i);
+    return { ...row, venueId: e.venueId, gm: Number(e.gm) };
   });
   const s = d.settings ?? {};
   const settings = {
@@ -78,6 +87,7 @@ export function parseBackup(text) {
     bankrollStartDate: isValidDateStr(s.bankrollStartDate) ? s.bankrollStartDate : null,
     handTags: Array.isArray(s.handTags) ? s.handTags.filter(isStr) : [...DEFAULT_HAND_TAGS],
     initialized: true,
+    gmMigrated: true,
   };
   return { sessions, tickets, hands, venues, ledger, settings, exportedAt: json.exportedAt };
 }
@@ -89,15 +99,21 @@ const csvCell = (v) => {
 };
 
 export function exportSessionsCSV() {
-  const rows = [['날짜', '상태', '플랫폼·장소', '대회명', '종류', '참가 방식', '바이인', '리엔트리', '비용', '순위', '참가자', '상금', '획득 티켓 액면가', '손익', '메모']];
+  const rows = [['날짜', '상태', '플랫폼·장소', '대회명', '종류', '통화', '참가 방식', '바이인', '리엔트리', '비용', '순위', '참가자', '상금', '획득 티켓 액면가(원)', '손익', '원화 환산 손익', '메모']];
   const list = [...data.sessions].sort((a, b) => (a.date === b.date ? a.createdAt - b.createdAt : a.date < b.date ? -1 : 1));
   for (const s of list) {
     const m = sessionMoney(s);
     const t = s.entryTicketId ? ticketById(s.entryTicketId) : null;
+    const done = s.status === 'done';
+    const unit = s.gm ? `게임머니(${venueById(s.venueId)?.gmUnit ?? '억'})` : '원';
     rows.push([
-      s.date, SESSION_STATUS[s.status].label, venueName(s.venueId), s.name, KIND[s.kind], t ? `티켓(${t.name})` : '현금',
-      s.buyIn, s.reentries || 0, s.status === 'done' ? m.cost : '', s.place ?? '', s.entrants ?? '',
-      s.status === 'done' ? m.prize : '', s.status === 'done' ? m.ticketValue : '', s.status === 'done' ? m.profit : '', s.memo,
+      s.date, SESSION_STATUS[s.status].label, venueName(s.venueId), s.name, KIND[s.kind], unit,
+      s.gm ? '게임머니' : t ? `티켓(${t.name})` : '현금',
+      s.buyIn, s.reentries || 0,
+      done ? (s.gm ? m.gmCost : m.cost) : '', s.place ?? '', s.entrants ?? '',
+      done ? (s.gm ? m.gmPrize : m.prize) : '', done ? m.ticketValue : '',
+      done ? (s.gm ? m.gmProfit : m.profit) : '',
+      done && !m.unconverted ? Math.round(m.profit) : '', s.memo,
     ]);
   }
   const csv = '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';

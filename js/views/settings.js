@@ -9,7 +9,7 @@ import { exportJSON, exportSessionsCSV, parseBackup } from '../export.js';
 import {
   openSheet, dialog, confirmDialog, promptDialog, alertDialog, toast, bindNumber, icon, ICONS,
 } from '../ui.js';
-import { esc, won, num, uuid, todayStr, isValidDateStr, dateLabel, parseNum } from '../utils.js';
+import { esc, won, gm, num, uuid, todayStr, isValidDateStr, dateLabel, parseNum } from '../utils.js';
 import { APP_VERSION } from '../version.js';
 import { segmented } from './common.js';
 
@@ -39,7 +39,7 @@ export function openSettings() {
         <h2 class="card-title">플랫폼·장소</h2>
         <ul class="manage-list">
           ${venues.map((v, i) => `<li class="manage-row" data-id="${esc(v.id)}">
-            <span class="manage-name">${esc(v.name)} <span class="muted small">${v.type === 'online' ? '온라인' : '오프라인'}</span></span>
+            <span class="manage-name">${esc(v.name)} <span class="muted small">${v.type === 'online' ? '온라인' : '오프라인'}${v.gameMoney ? ` · 게임머니(${esc(v.gmUnit)})` : ''}</span></span>
             <button type="button" class="icon-btn sm" data-op="up" aria-label="위로" ${i === 0 ? 'disabled' : ''}>${icon(ICONS.up)}</button>
             <button type="button" class="icon-btn sm" data-op="down" aria-label="아래로" ${i === venues.length - 1 ? 'disabled' : ''}>${icon(ICONS.down)}</button>
             <button type="button" class="icon-btn sm" data-op="rename" aria-label="이름 변경">${icon(ICONS.edit)}</button>
@@ -83,16 +83,10 @@ export function openSettings() {
     on('start', editStart);
     on('ledger', openLedger);
     on('venue-add', async () => {
-      const r = await dialog({
-        title: '플랫폼·장소 추가', input: { placeholder: '이름', maxlength: 30 },
-        html: `<div class="chip-row radio-row">
-          <label class="mode-opt compact"><input type="radio" name="vt" value="offline" checked><span><b>오프라인</b></span></label>
-          <label class="mode-opt compact"><input type="radio" name="vt" value="online"><span><b>온라인</b></span></label></div>`,
-        buttons: [{ label: '취소', value: false }, { label: '추가', value: true, kind: 'primary' }],
-      });
-      if (!r.button || !r.value) return;
-      if (activeVenues().some((v) => v.name === r.value)) { toast('같은 이름이 있어요'); return; }
-      await addVenue(r.value, r.choice || 'offline');
+      const r = await venueDialog({ title: '플랫폼·장소 추가' });
+      if (!r) return;
+      if (activeVenues().some((v) => v.name === r.name)) { toast('같은 이름이 있어요'); return; }
+      await addVenue(r.name, r.type, { gameMoney: r.gameMoney, gmUnit: r.gmUnit });
       render(); actions.refresh();
     });
     b.querySelectorAll('.manage-row [data-op]').forEach((el) => el.addEventListener('click', async () => {
@@ -106,10 +100,18 @@ export function openSettings() {
         [ids[i], ids[j]] = [ids[j], ids[i]];
         await reorderVenues(ids);
       } else if (op === 'rename') {
-        const name = await promptDialog({ title: '이름 변경', value: v.name });
-        if (!name || name === v.name) return;
-        if (activeVenues().some((x) => x.name === name)) { toast('같은 이름이 있어요'); return; }
-        await updateVenue({ ...v, name });
+        const r = await venueDialog({ title: '플랫폼·장소 편집', venue: v });
+        if (!r) return;
+        if (r.name !== v.name && activeVenues().some((x) => x.name === r.name)) { toast('같은 이름이 있어요'); return; }
+        if (r.gameMoney !== !!v.gameMoney) {
+          const n = data.sessions.filter((x) => x.venueId === id).length;
+          if (n && !await confirmDialog({
+            title: r.gameMoney ? '게임머니 플랫폼으로 바꿀까요?' : '원화 플랫폼으로 바꿀까요?',
+            message: `이미 기록한 대회 ${n}건은 기존 단위(${v.gameMoney ? '게임머니' : '원화'})로 그대로 남고, 앞으로 입력하는 대회부터 적용돼요.`,
+            confirmText: '바꾸기',
+          })) return;
+        }
+        await updateVenue({ ...v, name: r.name, type: r.type, gameMoney: r.gameMoney, gmUnit: r.gmUnit });
       } else if (op === 'delete') {
         const n = data.sessions.filter((s) => s.venueId === id).length;
         if (!await confirmDialog({ title: `'${v.name}' 삭제`, message: n ? `선택 목록에서만 사라지고, 기록된 대회 ${n}건에는 그대로 남아요.` : '선택 목록에서 사라져요.', confirmText: '삭제', danger: true })) return;
@@ -165,28 +167,73 @@ export function openSettings() {
   render();
 }
 
+/* ---------- 플랫폼 입력 대화상자 ---------- */
+async function venueDialog({ title, venue = null }) {
+  const v = venue ?? { name: '', type: 'offline', gameMoney: false, gmUnit: '억' };
+  const r = await dialog({
+    title,
+    html: `
+      <label class="field-label no-top" for="vd-name">이름</label>
+      <input id="vd-name" class="field" type="text" maxlength="30" value="${esc(v.name)}" placeholder="예: 피망, 강남 ○○홀덤펍">
+      <div class="chip-row radio-row">
+        <label class="mode-opt compact"><input type="radio" name="vt" value="offline" ${v.type !== 'online' ? 'checked' : ''}><span><b>오프라인</b></span></label>
+        <label class="mode-opt compact"><input type="radio" name="vt" value="online" ${v.type === 'online' ? 'checked' : ''}><span><b>온라인</b></span></label>
+      </div>
+      <label class="check-row"><input type="checkbox" id="vd-gm" ${v.gameMoney ? 'checked' : ''}><span>게임머니 사용 <small class="muted">충전한 머니로 참가하는 플랫폼</small></span></label>
+      <label class="field-label" for="vd-unit">게임머니 단위</label>
+      <input id="vd-unit" class="field" type="text" maxlength="4" value="${esc(v.gmUnit || '억')}" placeholder="억">`,
+    buttons: [{ label: '취소', value: false }, { label: '저장', value: true, kind: 'primary' }],
+  });
+  if (!r.button) return null;
+  const name = (r.fields['vd-name'] || '').trim();
+  if (!name) { toast('이름을 입력해 주세요'); return null; }
+  return { name, type: r.choice || 'offline', gameMoney: !!r.checked[0], gmUnit: (r.fields['vd-unit'] || '억').trim() || '억' };
+}
+
 /* ---------- 입출금 ---------- */
+let ledgerPage = null;
+export const refreshLedger = () => ledgerPage?.render();
+
 export function openLedger() {
-  const sheet = openSheet({ title: '입출금 기록', page: true });
+  const sheet = openSheet({ title: '입출금 기록', page: true, onClose: () => { ledgerPage = null; } });
+  ledgerPage = { render: () => render() };
   function render() {
     const br = bankroll();
     const list = [...data.ledger].sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1));
+    const row = (e) => {
+      const v = e.venueId ? data.venues.find((x) => x.id === e.venueId) : null;
+      const label = { deposit: '입금', withdraw: '출금', topup: '충전', gmadjust: '조정' }[e.type];
+      const right = e.type === 'deposit' ? `<b class="gain">+${won(e.amount)}</b>`
+        : e.type === 'withdraw' ? `<b class="loss">−${won(e.amount)}</b>`
+          : e.type === 'topup' ? `<b class="loss">−${won(e.amount)}</b>`
+            : `<b>${gm(e.gm, v?.gmUnit)}</b>`;
+      const sub = [e.type === 'topup' ? `${esc(v?.name ?? '')} +${gm(e.gm, v?.gmUnit)}` : e.type === 'gmadjust' ? `${esc(v?.name ?? '')} 잔고 조정` : '', esc(e.memo)].filter(Boolean).join(' · ');
+      return `<li><button type="button" class="ledger-row" data-id="${esc(e.id)}" data-type="${e.type}">
+        <span class="lg-type ${e.type}">${label}</span>
+        <span class="lg-main"><span>${dateLabel(e.date)}</span>${sub ? `<span class="muted small">${sub}</span>` : ''}</span>
+        ${right}
+      </button></li>`;
+    };
     sheet.body.innerHTML = `
       <section class="card block">
         <div class="kv"><span>현금 뱅크롤</span><b>${won(br.cash)}</b></div>
         <div class="kv"><span>총 입금</span><b>${won(br.deposits)}</b></div>
         <div class="kv"><span>총 출금</span><b>${won(br.withdrawals)}</b></div>
+        ${br.topups ? `<div class="kv"><span>게임머니 충전</span><b>${won(br.topups)}</b></div>` : ''}
       </section>
-      <p class="help">뱅크롤에 돈을 넣거나 생활비로 빼 쓴 금액을 기록하세요. 대회 바이인·상금은 대회 기록에서 자동 반영돼요.</p>
-      <div class="btn-row"><button type="button" class="btn primary" data-new="deposit">＋ 입금</button><button type="button" class="btn ghost" data-new="withdraw">− 출금</button></div>
-      ${list.length ? `<ul class="ledger-list card">${list.map((e) => `
-        <li><button type="button" class="ledger-row" data-id="${esc(e.id)}">
-          <span class="lg-type ${e.type}">${e.type === 'deposit' ? '입금' : '출금'}</span>
-          <span class="lg-main"><span>${dateLabel(e.date)}</span>${e.memo ? `<span class="muted small">${esc(e.memo)}</span>` : ''}</span>
-          <b class="${e.type === 'deposit' ? 'gain' : 'loss'}">${e.type === 'deposit' ? '+' : '−'}${won(e.amount)}</b>
-        </button></li>`).join('')}</ul>` : '<p class="muted empty-line center">기록이 없어요</p>'}`;
-    sheet.body.querySelectorAll('[data-new]').forEach((b) => b.addEventListener('click', () => edit(null, b.dataset.new)));
-    sheet.body.querySelectorAll('.ledger-row').forEach((b) => b.addEventListener('click', () => edit(b.dataset.id)));
+      <p class="help">뱅크롤에 돈을 넣거나 생활비로 빼 쓴 금액을 기록하세요. 대회 바이인·상금은 대회 기록에서, 게임머니 충전은 홈의 플랫폼 잔고에서 기록해요.</p>
+      <div class="btn-row"><button type="button" class="btn primary" data-new="deposit">＋ 입금</button><button type="button" class="btn ghost" data-new="withdraw">− 출금</button>${data.venues.some((v) => v.gameMoney && !v.deleted) ? '<button type="button" class="btn ghost" data-new="topup">충전</button>' : ''}</div>
+      ${list.length ? `<ul class="ledger-list card">${list.map(row).join('')}</ul>` : '<p class="muted empty-line center">기록이 없어요</p>'}`;
+    sheet.body.querySelectorAll('[data-new]').forEach((b) => b.addEventListener('click', async () => {
+      if (b.dataset.new === 'topup') (await import('./wallet.js')).openTopup();
+      else edit(null, b.dataset.new);
+    }));
+    sheet.body.querySelectorAll('.ledger-row').forEach((b) => b.addEventListener('click', async () => {
+      const t = b.dataset.type;
+      if (t === 'topup') (await import('./wallet.js')).openTopup(null, b.dataset.id);
+      else if (t === 'gmadjust') (await import('./wallet.js')).openAdjust(null, b.dataset.id);
+      else edit(b.dataset.id);
+    }));
   }
   function edit(id, type) {
     const orig = id ? data.ledger.find((e) => e.id === id) : null;

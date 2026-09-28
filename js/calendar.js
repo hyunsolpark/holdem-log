@@ -1,6 +1,6 @@
 // 대회 일정·티켓 만료일을 폰 캘린더에 추가 (Google 캘린더 링크 / .ics)
-import { addDays, download, safeFileName, won } from './utils.js';
-import { venueName } from './store.js';
+import { addDays, download, safeFileName, won, gm } from './utils.js';
+import { venueName, venueById } from './store.js';
 import { plannedCost } from './money.js';
 
 const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
@@ -25,7 +25,7 @@ export function sessionEvent(s) {
     uid: `session-${s.id}`,
     title: `[홀덤] ${s.name}`,
     date: s.date, start, end,
-    details: [`${venueName(s.venueId)} · 바이인 ${won(s.buyIn)}${pc.ticket ? ` (티켓: ${pc.ticket.name})` : ''}`, s.memo, `홀덤 로그: ${appUrl()}`].filter(Boolean).join('\n'),
+    details: [`${venueName(s.venueId)} · 바이인 ${s.gm ? gm(s.buyIn, venueById(s.venueId)?.gmUnit) : won(s.buyIn)}${pc.ticket ? ` (티켓: ${pc.ticket.name})` : ''}`, s.memo, `홀덤 로그: ${appUrl()}`].filter(Boolean).join('\n'),
     alarm: start ? '-PT1H' : 'PT9H',
   };
 }
