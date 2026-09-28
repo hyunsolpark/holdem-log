@@ -16,7 +16,7 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     date: date0,
     startTime: base?.startTime ?? '',
     endTime: base?.endTime ?? '',
-    venueId: base?.venueId ?? activeVenues()[0]?.id ?? null,
+    venueId: base?.venueId ?? null,
     name: base?.name ?? '',
     kind: base?.kind ?? 'mtt',
     buyIn: base?.buyIn ?? null,
@@ -27,7 +27,7 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     entrants: orig?.entrants ?? null,
     prize: orig?.prize ?? null,
     memo: orig?.memo ?? '',
-    gm: orig ? !!orig.gm : !!venueById(base?.venueId ?? activeVenues()[0]?.id)?.gameMoney,
+    gm: orig ? !!orig.gm : prefill ? !!prefill.gm : !!data.settings.lastSessionGm,
     won: orig ? ticketsWonBy(orig.id).map((t) => ({ id: t.id, name: t.name, faceValue: t.faceValue, expiresAt: t.expiresAt ?? '', status: t.status })) : [],
   };
   let statusTouched = !!orig || !!presetStatus;
@@ -39,6 +39,14 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     isDirty: () => snap() !== initial,
   });
 
+  const gmVenueList = () => activeVenues().filter((v) => v.gameMoney);
+  /** 구분(게임머니 / 현금·티켓)에 맞는 기본 플랫폼 */
+  const defaultVenue = (gmMode) => {
+    const list = gmMode ? gmVenueList() : activeVenues();
+    const lastId = gmMode ? data.settings.lastGmVenueId : data.settings.lastCashVenueId;
+    return (list.find((v) => v.id === lastId) ?? (gmMode ? list[0] : list.find((v) => v.type === 'offline') ?? list[0]))?.id ?? null;
+  };
+  if (!f.venueId) f.venueId = defaultVenue(f.gm);
   const unitOf = () => venueById(f.venueId)?.gmUnit ?? '억';
   const amt = (v) => (f.gm ? String(+v.toFixed(2)) : num(v));
   const availableTickets = () => data.tickets.filter((t) => t.status === 'held' || t.id === f.entryTicketId)
@@ -70,7 +78,7 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
 
   function render() {
     const b = sheet.body;
-    const venues = activeVenues();
+    const venues = f.gm ? gmVenueList() : activeVenues();
     const cur = f.venueId && !venues.some((v) => v.id === f.venueId) ? data.venues.find((v) => v.id === f.venueId) : null;
     const tickets = availableTickets();
     const done = f.status === 'done';
@@ -83,7 +91,11 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
         <div><label class="field-label" for="s-end">종료</label><input id="s-end" class="field" type="time" value="${esc(f.endTime)}"></div>
       </div>
 
-      <div class="field-label">플랫폼·장소</div>
+      ${gmVenueList().length || f.gm ? `
+        <div class="field-label">구분</div>
+        ${segmented('mode', [{ value: 'cash', label: '현금·티켓 대회' }, { value: 'gm', label: '게임머니 대회' }], f.gm ? 'gm' : 'cash', { small: true })}` : ''}
+
+      <div class="field-label">${f.gm ? '플랫폼 (게임머니)' : '플랫폼·장소'}</div>
       <div class="chip-row">
         ${[...venues, ...(cur ? [cur] : [])].map((v) => `<button type="button" class="chip small ${v.id === f.venueId ? 'on' : ''}" aria-pressed="${v.id === f.venueId}" data-venue="${esc(v.id)}">${esc(v.name)}</button>`).join('')}
         <button type="button" class="chip small ghost-chip" id="venue-add">＋ 추가</button>
@@ -204,33 +216,42 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
     b.querySelectorAll('[data-venue]').forEach((el) => el.addEventListener('click', () => {
       read();
       f.venueId = el.dataset.venue;
-      const nextGm = !!venueById(f.venueId)?.gameMoney;
-      if (nextGm !== f.gm) {
-        f.gm = nextGm;
-        if (f.gm) { f.entryTicketId = null; f._entry = 'cash'; }
-        f.buyIn = null; f.prize = null; // 단위가 바뀌므로 금액은 다시 입력
-        render();
-        if (!orig) toast(f.gm ? '게임머니 대회로 바뀌었어요. 금액을 다시 입력해 주세요' : '원화 대회로 바뀌었어요. 금액을 다시 입력해 주세요');
-        return;
-      }
+      if (f.gm) { render(); return; } // 단위 표시(억 등) 갱신
       b.querySelectorAll('[data-venue]').forEach((x) => { x.classList.toggle('on', x === el); x.setAttribute('aria-pressed', String(x === el)); });
     }));
     b.querySelector('#venue-add').addEventListener('click', async () => {
       read();
       const r = await dialog({
-        title: '플랫폼·장소 추가',
-        input: { placeholder: '예: 강남 ○○홀덤펍', maxlength: 30 },
-        html: `<div class="chip-row radio-row">
+        title: f.gm ? '게임머니 플랫폼 추가' : '플랫폼·장소 추가',
+        input: { placeholder: f.gm ? '예: 한게임' : '예: 강남 ○○홀덤펍', maxlength: 30 },
+        html: f.gm ? '' : `<div class="chip-row radio-row">
           <label class="mode-opt compact"><input type="radio" name="vt" value="offline" checked><span><b>오프라인</b></span></label>
           <label class="mode-opt compact"><input type="radio" name="vt" value="online"><span><b>온라인</b></span></label></div>`,
         buttons: [{ label: '취소', value: false }, { label: '추가', value: true, kind: 'primary' }],
       });
       if (!r.button || !r.value) return;
       const exist = activeVenues().find((v) => v.name === r.value);
-      const v = exist ?? await addVenue(r.value, r.choice || 'offline');
+      const v = exist ?? (f.gm
+        ? await addVenue(r.value, 'online', { gameMoney: true, gmUnit: '억' })
+        : await addVenue(r.value, r.choice || 'offline'));
       f.venueId = v.id;
       render();
     });
+    b.querySelectorAll('[data-mode]').forEach((el) => el.addEventListener('click', () => {
+      read();
+      const next = el.dataset.mode === 'gm';
+      if (next === f.gm) return;
+      f.gm = next;
+      if (f.gm) {
+        f.entryTicketId = null; f._entry = 'cash';
+        if (!venueById(f.venueId)?.gameMoney) f.venueId = defaultVenue(true);
+      }
+      const had = f.buyIn || f.prize;
+      f.buyIn = null; f.prize = null; // 단위가 바뀌므로 금액은 다시 입력
+      render();
+      if (had) toast('단위가 바뀌어서 금액을 다시 입력해 주세요');
+      if (f.gm && !gmVenueList().length) toast('설정에서 게임머니 플랫폼을 먼저 지정해 주세요');
+    }));
     b.querySelectorAll('[data-kind]').forEach((el) => el.addEventListener('click', () => { read(); f.kind = el.dataset.kind; render(); }));
     b.querySelectorAll('[data-entry]').forEach((el) => el.addEventListener('click', () => {
       read();
@@ -304,6 +325,11 @@ export function openSessionForm(id = null, { status: presetStatus, date: presetD
       return fail(e.message);
     }
     sheet.close();
+    if (!orig) {
+      const { setSetting } = await import('../store.js');
+      await setSetting('lastSessionGm', f.gm);
+      await setSetting(f.gm ? 'lastGmVenueId' : 'lastCashVenueId', f.venueId);
+    }
     actions.refresh();
     if (row.status === 'planned') {
       const { openCalendarFor } = await import('./sheets.js');

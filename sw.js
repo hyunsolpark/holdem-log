@@ -1,6 +1,6 @@
 // 서비스 워커: 앱 셸 사전 캐시 + cache-first
 // 파일을 수정해 배포할 때마다 CACHE_VERSION을 올려야 사용자 기기에 새 버전이 전달됩니다.
-const CACHE_VERSION = 'v1.1.0';
+const CACHE_VERSION = 'v1.1.1';
 const CACHE = `holdem-log-${CACHE_VERSION}`;
 
 const SHELL = [
